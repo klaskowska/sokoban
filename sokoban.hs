@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 import CodeWorld
 
 cloud :: Picture
@@ -33,32 +34,84 @@ colorBox c = rectangle 1 1
   & polyline([(-0.5, 0.5), (0.5, -0.5)])
   & polyline([(0.5, 0.5), (-0.5, -0.5)])
   & colored c (solidRectangle 1 1)
-  
-drawTile :: Int -> Picture
-drawTile fieldType
-  | fieldType == 1 = wall
-  | fieldType == 2 = ground
-  | fieldType == 3 = storage
-  | fieldType == 4 = box False
-  | otherwise = blankField
 
-maze :: Int -> Int -> Int
-maze x y
-  | abs x > 4  || abs y > 4  = 0  -- blank
-  | abs x == 4 || abs y == 4 = 1  -- wall
-  | x ==  2 && y <= 0        = 1  -- wall
-  | x ==  3 && y <= 0        = 3  -- storage
-  | x >= -2 && y == 0        = 4  -- box
-  | otherwise                = 2  -- ground
+data Tile = Wall | Ground | Storage | Box | Blank
+
+drawTile :: Tile -> Picture
+drawTile Wall = wall
+drawTile Ground = ground
+drawTile Storage = storage
+drawTile Box = box False
+drawTile Blank = blankField
+
+data Coord = C {x, y :: Integer}
+initialState :: (Direction, Coord)
+initialState = (U, C 0 1)
+
+maze :: Coord -> Tile
+maze c
+  | abs (x c) > 4  || abs (y c) > 4 = Blank
+  | abs (x c) == 4 || abs (y c) == 4 = Wall
+  | (x c) ==  2 && (y c) <= 0 = Wall
+  | (x c) ==  3 && (y c) <= 0 = Storage
+  | (x c) >= -2 && (y c) == 0 = Box
+  | otherwise = Ground
 
 pictureOfMaze :: Picture
-pictureOfMaze = pictures [translated (fromIntegral x) (fromIntegral y) (drawTile (maze x y)) 
+pictureOfMaze = pictures [translated (fromIntegral x) (fromIntegral y) (drawTile (maze (C x y))) 
   | x <- [-10 .. 10], y <- [-10 .. 10]]
+  
+player1 :: Picture
+player1 = polyline [(0, -0.4), (0, 0.4)] & polyline [(-0.2, 0.2), (0, 0.4), (0.2, 0.2)]
+
+data Direction = R | U | L | D
+
+adjacentCoords :: Direction -> Coord -> (Coord, Coord)
+adjacentCoords R (C x y) = (C x y, C (x+1) y)
+adjacentCoords U (C x y) = (C x y, C x (y+1))
+adjacentCoords L (C x y) = (C x y, C (x-1) y)
+adjacentCoords D (C x y) = (C x y, C x (y-1))
+
+newPosition :: Direction -> Coord -> Coord
+newPosition d c
+  | isMovePossible (maze (snd movedCoord)) = snd movedCoord
+  | otherwise = fst movedCoord
+  where movedCoord = adjacentCoords d c
+
+handleEvent :: Event -> (Direction, Coord) -> (Direction, Coord)
+handleEvent (KeyPress key) (d, c)
+    | key == "Right" = (R, newPosition R c)
+    | key == "Up"    = (U, newPosition U c)
+    | key == "Left"  = (L, newPosition L c)
+    | key == "Down"  = (D, newPosition D c)
+handleEvent _ x      = x
+
+isMovePossible tile =
+  case tile of
+    Ground -> True
+    Storage -> True
+    _ -> False
+
+rotate :: Direction -> Picture -> Picture
+rotate d p =
+  case d of
+    R -> rotated (pi * (-0.5)) p
+    U -> p
+    L -> rotated (pi * 0.5) p
+    D -> rotated pi p
+
+atCoord :: Coord -> Picture -> Picture
+atCoord (C x y) pic = translated (fromIntegral x) (fromIntegral y) pic
+
+drawState (d, c) = atCoord c (rotate d player1) & pictureOfMaze
+
+walk1 :: IO ()
+walk1 = activityOf initialState handleEvent drawState
 
 type Program = IO ()
 
 program :: Program
-program = drawingOf pictureOfMaze
+program = walk1
 
 main :: Program
 main = program
