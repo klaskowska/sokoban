@@ -49,6 +49,12 @@ drawTile Blank = blankField
 
 data Coord = C {x, y :: Integer}
 
+equalCoord :: Coord -> Coord -> Bool
+equalCoord (C x1 y1) (C x2 y2) = x1 == x2 && y1 == y2
+
+boardCoords :: [Coord]
+boardCoords = [C x y | x <- [-10 .. 10], y <- [-10 .. 10]]
+
 maze :: Coord -> Tile
 maze c
   | abs (x c) > 4  || abs (y c) > 4 = Blank
@@ -62,6 +68,27 @@ pictureOfMaze :: Picture
 pictureOfMaze = pictures [translated (fromIntegral x) (fromIntegral y) (drawTile (maze (C x y))) 
   | x <- [-10 .. 10], y <- [-10 .. 10]]
 
+removeBox t = 
+  case t of
+    Box -> Ground
+    x -> x
+
+removeBoxes :: (Coord -> Tile) -> Coord -> Tile
+removeBoxes mazeDefinition = (\c -> removeBox (mazeDefinition c))
+
+containsCoord :: Coord -> [Coord] -> Bool
+containsCoord c coords = 
+  case coords of
+    [] -> False
+    x:xs | equalCoord c x -> True
+    _:xs -> containsCoord c xs
+    
+  
+
+type Maze = Coord -> Tile
+addBoxes :: [Coord] -> Maze -> Maze
+addBoxes boxCoords mazeDefinition = (\c -> if containsCoord c boxCoords then Box else mazeDefinition c)
+
 data Direction = R | U | L | D
 
 initialCoord :: Coord
@@ -71,6 +98,7 @@ data Position = P {dir :: Direction, coord :: Coord}
 
 initialState2 :: Position
 initialState2 = P U (C 0 1)
+initialPos = P U (C 0 1)
 
 rotate :: Direction -> Picture -> Picture
 rotate d p =
@@ -151,6 +179,19 @@ resettableHandleEvent initialPos handleEvent = (\evn pos ->
     then handleEvent evn initialPos 
   else handleEvent evn pos)
 
+data State = S {playerPosition :: Position, boxPositions :: [Coord]}
+
+isBox :: Tile -> Bool
+isBox t =
+  case t of
+    Box -> True
+    _ -> False
+
+initialBoxes :: (Coord -> Tile) -> [Coord] -> [Coord]
+initialBoxes mazeDefinition coords = filter (\c -> isBox (mazeDefinition c)) coords
+
+initialState mazeDefinition coords = S initialPos (initialBoxes mazeDefinition coords)
+
 data SSState world = StartScreen | Running world
 
 data Activity world = Activity {
@@ -194,7 +235,7 @@ walk4 = runActivity (resettable (withStartScreen (Activity initialState2 handleE
 type Program = IO ()
 
 program :: Program
-program = walk3
+program = walk4
 
 main :: Program
 main = program
