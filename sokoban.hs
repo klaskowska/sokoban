@@ -64,8 +64,8 @@ maze c
   | (x c) >= -2 && (y c) == 0 = Box
   | otherwise = Ground
 
-pictureOfMaze :: Picture
-pictureOfMaze = pictures [translated (fromIntegral x) (fromIntegral y) (drawTile (maze (C x y))) 
+pictureOfMaze :: Maze -> Picture
+pictureOfMaze mazeDefinition = pictures [translated (fromIntegral x) (fromIntegral y) (drawTile (mazeDefinition (C x y))) 
   | x <- [-10 .. 10], y <- [-10 .. 10]]
 
 removeBox t = 
@@ -74,7 +74,7 @@ removeBox t =
     x -> x
 
 removeBoxes :: (Coord -> Tile) -> Coord -> Tile
-removeBoxes mazeDefinition = (\c -> removeBox (mazeDefinition c))
+removeBoxes mazeDefinition = f . maze where f = removeBox
 
 containsCoord :: Coord -> [Coord] -> Bool
 containsCoord c coords = 
@@ -82,8 +82,6 @@ containsCoord c coords =
     [] -> False
     x:xs | equalCoord c x -> True
     _:xs -> containsCoord c xs
-    
-  
 
 type Maze = Coord -> Tile
 addBoxes :: [Coord] -> Maze -> Maze
@@ -94,11 +92,16 @@ data Direction = R | U | L | D
 initialCoord :: Coord
 initialCoord = C 0 1
 
-data Position = P {dir :: Direction, coord :: Coord}
+initialDirection :: Direction
+initialDirection = U
 
-initialState2 :: Position
-initialState2 = P U (C 0 1)
-initialPos = P U (C 0 1)
+initialBoxes :: (Coord -> Tile) -> [Coord] -> [Coord]
+initialBoxes mazeDefinition coords = filter (\c -> isBox (mazeDefinition c)) coords
+
+data State = S {playerCoord :: Coord, playerDir :: Direction, boxCoords :: [Coord]}
+
+initialState :: Maze -> [Coord] -> State
+initialState mazeDefinition coords = S initialCoord initialDirection (initialBoxes mazeDefinition coords)
 
 rotate :: Direction -> Picture -> Picture
 rotate d p =
@@ -126,40 +129,62 @@ isMovePossible tile =
     Storage -> True
     _ -> False
 
-newPosition :: Direction -> Coord -> Coord
-newPosition d c
+newCoord :: Direction -> Coord -> Coord
+newCoord d c
   | isMovePossible (maze (snd movedCoord)) = snd movedCoord
   | otherwise = fst movedCoord
   where movedCoord = adjacentCoords d c
 
-handleEvent1 :: Event -> Coord -> Coord
-handleEvent1 (KeyPress key) c
-    | key == "Right" = newPosition R c
-    | key == "Up"    = newPosition U c
-    | key == "Left"  = newPosition L c
-    | key == "Down"  = newPosition D c
-handleEvent1 _ c      = c
+currentTile :: Coord -> [Coord] -> Tile
+currentTile coord boxCoords = 
+  if containsCoord coord boxCoords then Box
+    else
+      case maze coord of
+        Box -> Ground
+        x -> x
 
-handleEvent2 :: Event -> Position -> Position
-handleEvent2 (KeyPress key) pos
+moveBox :: [Coord] -> Coord -> Coord -> [Coord]
+moveBox coords lastCoord newCoord = 
+  (filter (\x -> not (equalCoord x lastCoord)) coords) ++ [newCoord]
+
+updateStateWithMovingBox :: State -> Direction -> Coord -> State
+updateStateWithMovingBox state dir newCoord = 
+  case currentTile boxNewCoord (boxCoords state) of
+    Ground -> movedBoxState
+    Storage -> movedBoxState
+    _ -> S (playerCoord state) dir (boxCoords state)
+  where boxNewCoord = snd (adjacentCoords dir newCoord)
+        movedBoxState = S newCoord dir (moveBox (boxCoords state) newCoord boxNewCoord)
+
+updateState :: State -> Direction -> State
+updateState state dir =
+  case newPositionTile of
+    Ground -> newStateWithoutMovingBox
+    Storage -> newStateWithoutMovingBox
+    Box -> updateStateWithMovingBox state dir newCoord
+    _ -> S (playerCoord state) dir (boxCoords state)
+    where newCoord = snd (adjacentCoords dir (playerCoord state))
+          newPositionTile = currentTile newCoord (boxCoords state)
+          newStateWithoutMovingBox = S newCoord dir (boxCoords state)
+
+handleEvent :: Event -> State -> State
+handleEvent (KeyPress key) state
     | key == "Right" = go R
     | key == "Up"    = go U
     | key == "Left"  = go L
     | key == "Down"  = go D
-    where go dir = P dir (newPosition dir (coord pos))
-handleEvent2 _ x      = x
+    where go dir = updateState state dir 
+handleEvent _ state      = state
 
 atCoord :: Coord -> Picture -> Picture
 atCoord (C x y) pic = translated (fromIntegral x) (fromIntegral y) pic
 
 drawState1 :: Coord -> Picture
-drawState1 c = atCoord c player1 & pictureOfMaze
+drawState1 c = atCoord c player1 & pictureOfMaze maze
 
-drawState2 :: Position -> Picture
-drawState2 pos = atCoord (coord pos) (player2 (dir pos)) & pictureOfMaze
-
-walk1 :: IO ()
-walk1 = activityOf initialCoord handleEvent1 drawState1
+draw :: State -> Picture
+draw (S playerCoord playerDir boxCoords) = atCoord playerCoord (player2 playerDir)
+ & pictureOfMaze (addBoxes boxCoords (removeBoxes maze))
 
 isEscapePressed (KeyPress key)
   | key == "Esc" = True
@@ -179,18 +204,11 @@ resettableHandleEvent initialPos handleEvent = (\evn pos ->
     then handleEvent evn initialPos 
   else handleEvent evn pos)
 
-data State = S {playerPosition :: Position, boxPositions :: [Coord]}
-
 isBox :: Tile -> Bool
 isBox t =
   case t of
     Box -> True
     _ -> False
-
-initialBoxes :: (Coord -> Tile) -> [Coord] -> [Coord]
-initialBoxes mazeDefinition coords = filter (\c -> isBox (mazeDefinition c)) coords
-
-initialState mazeDefinition coords = S initialPos (initialBoxes mazeDefinition coords)
 
 data SSState world = StartScreen | Running world
 
@@ -223,14 +241,8 @@ runActivity :: Activity s -> IO ()
 runActivity (Activity state0 handle draw)
   = activityOf state0 handle draw
 
-walk2 :: IO ()
-walk2 = runActivity (Activity initialState2 handleEvent2 drawState2)
-
-walk3 :: IO ()
-walk3 = runActivity (resettable (Activity initialState2 handleEvent2 drawState2))
-
 walk4 :: IO ()
-walk4 = runActivity (resettable (withStartScreen (Activity initialState2 handleEvent2 drawState2)))
+walk4 = runActivity (resettable (withStartScreen (Activity (initialState maze (initialBoxes maze boardCoords)) handleEvent draw)))
 
 type Program = IO ()
 
