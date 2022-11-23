@@ -4,6 +4,9 @@ import CodeWorld
 startScreen :: Picture
 startScreen = scaled 3 3 (lettering "Sokoban!")
 
+winningScreen :: Picture
+winningScreen = scaled 3 3 (lettering "You win!")
+
 cloud :: Picture
 cloud = pictures [translated x y (colored white (solidCircle 0.15))
   | x <- [-0.25, 0, 0.25], y <- [0]]
@@ -167,7 +170,19 @@ updateState state dir =
           newPositionTile = currentTile newCoord (boxCoords state)
           newStateWithoutMovingBox = S newCoord dir (boxCoords state)
 
+allList :: [Bool] -> Bool
+allList bools = 
+  case bools of
+    [] -> True
+    x:xs | x == True -> allList xs
+    _ -> False
+    
+isWinning :: State -> Bool
+isWinning state = allList (map (\c -> isStorage (maze c)) (boxCoords state))
+
 handleEvent :: Event -> State -> State
+handleEvent _ state
+    | isWinning state = state
 handleEvent (KeyPress key) state
     | key == "Right" = go R
     | key == "Up"    = go U
@@ -183,8 +198,10 @@ drawState1 :: Coord -> Picture
 drawState1 c = atCoord c player1 & pictureOfMaze maze
 
 draw :: State -> Picture
-draw (S playerCoord playerDir boxCoords) = atCoord playerCoord (player2 playerDir)
- & pictureOfMaze (addBoxes boxCoords (removeBoxes maze))
+draw state = 
+  if isWinning state then winningScreen & board else board
+  where board = atCoord (playerCoord state) (player2 (playerDir state)) 
+                & pictureOfMaze (addBoxes (boxCoords state) (removeBoxes maze))
 
 isEscapePressed (KeyPress key)
   | key == "Esc" = True
@@ -208,6 +225,12 @@ isBox :: Tile -> Bool
 isBox t =
   case t of
     Box -> True
+    _ -> False
+    
+isStorage :: Tile -> Bool
+isStorage t =
+  case t of
+    Storage -> True
     _ -> False
 
 data SSState world = StartScreen | Running world
@@ -241,8 +264,11 @@ runActivity :: Activity s -> IO ()
 runActivity (Activity state0 handle draw)
   = activityOf state0 handle draw
 
+sokobanActivity :: Activity State
+sokobanActivity = Activity (initialState maze (initialBoxes maze boardCoords)) handleEvent draw
+
 walk4 :: IO ()
-walk4 = runActivity (resettable (withStartScreen (Activity (initialState maze (initialBoxes maze boardCoords)) handleEvent draw)))
+walk4 = runActivity (resettable (withStartScreen sokobanActivity))
 
 type Program = IO ()
 
