@@ -41,7 +41,7 @@ colorBox c = rectangle 1 1
   & polyline([(0.5, 0.5), (-0.5, -0.5)])
   & colored c (solidRectangle 1 1)
 
-data Tile = Wall | Ground | Storage | Box | Blank
+data Tile = Wall | Ground | Storage | Box | Blank deriving Eq
 
 drawTile :: Tile -> Picture
 drawTile Wall = wall
@@ -51,9 +51,8 @@ drawTile Box = box False
 drawTile Blank = blankField
 
 data Coord = C {x, y :: Integer}
-
-equalCoord :: Coord -> Coord -> Bool
-equalCoord (C x1 y1) (C x2 y2) = x1 == x2 && y1 == y2
+instance Eq Coord where
+  C x y == C x' y' = x == x' && y == y'
 
 boardCoords :: [Coord]
 boardCoords = [C x y | x <- [-10 .. 10], y <- [-10 .. 10]]
@@ -76,14 +75,14 @@ removeBox t =
     Box -> Ground
     x -> x
 
-removeBoxes :: (Coord -> Tile) -> Coord -> Tile
+removeBoxes :: Maze -> Coord -> Tile
 removeBoxes mazeDefinition = f . maze where f = removeBox
 
 containsCoord :: Coord -> [Coord] -> Bool
 containsCoord c coords = 
   case coords of
     [] -> False
-    x:xs | equalCoord c x -> True
+    x:xs | c == x -> True
     _:xs -> containsCoord c xs
 
 type Maze = Coord -> Tile
@@ -98,8 +97,8 @@ initialCoord = C 0 1
 initialDirection :: Direction
 initialDirection = U
 
-initialBoxes :: (Coord -> Tile) -> [Coord] -> [Coord]
-initialBoxes mazeDefinition coords = filter (\c -> isBox (mazeDefinition c)) coords
+initialBoxes :: Maze -> [Coord] -> [Coord]
+initialBoxes mazeDefinition coords = filter (\c -> (mazeDefinition c) == Box) coords
 
 data State = S {playerCoord :: Coord, playerDir :: Direction, boxCoords :: [Coord]}
 
@@ -114,29 +113,17 @@ rotate d p =
     L -> rotated (pi * 0.5) p
     D -> rotated pi p
 
-player1 :: Picture
-player1 = polyline [(0, -0.4), (0, 0.4)] & polyline [(-0.2, 0.2), (0, 0.4), (0.2, 0.2)]
+playerFigure :: Picture
+playerFigure = polyline [(0, -0.4), (0, 0.4)] & polyline [(-0.2, 0.2), (0, 0.4), (0.2, 0.2)]
 
-player2 :: Direction -> Picture
-player2 d = rotate d player1
+player :: Direction -> Picture
+player d = rotate d playerFigure
 
-adjacentCoords :: Direction -> Coord -> (Coord, Coord)
-adjacentCoords R (C x y) = (C x y, C (x+1) y)
-adjacentCoords U (C x y) = (C x y, C x (y+1))
-adjacentCoords L (C x y) = (C x y, C (x-1) y)
-adjacentCoords D (C x y) = (C x y, C x (y-1))
-
-isMovePossible tile =
-  case tile of
-    Ground -> True
-    Storage -> True
-    _ -> False
-
-newCoord :: Direction -> Coord -> Coord
-newCoord d c
-  | isMovePossible (maze (snd movedCoord)) = snd movedCoord
-  | otherwise = fst movedCoord
-  where movedCoord = adjacentCoords d c
+adjacentCoord :: Direction -> Coord -> Coord
+adjacentCoord R (C x y) = C (x+1) y
+adjacentCoord U (C x y) = C x (y+1)
+adjacentCoord L (C x y) = C (x-1) y
+adjacentCoord D (C x y) = C x (y-1)
 
 currentTile :: Coord -> [Coord] -> Tile
 currentTile coord boxCoords = 
@@ -148,7 +135,7 @@ currentTile coord boxCoords =
 
 moveBox :: [Coord] -> Coord -> Coord -> [Coord]
 moveBox coords lastCoord newCoord = 
-  (filter (\x -> not (equalCoord x lastCoord)) coords) ++ [newCoord]
+  (filter (\x -> x /= lastCoord) coords) ++ [newCoord]
 
 updateStateWithMovingBox :: State -> Direction -> Coord -> State
 updateStateWithMovingBox state dir newCoord = 
@@ -156,7 +143,7 @@ updateStateWithMovingBox state dir newCoord =
     Ground -> movedBoxState
     Storage -> movedBoxState
     _ -> S (playerCoord state) dir (boxCoords state)
-  where boxNewCoord = snd (adjacentCoords dir newCoord)
+  where boxNewCoord = adjacentCoord dir newCoord
         movedBoxState = S newCoord dir (moveBox (boxCoords state) newCoord boxNewCoord)
 
 updateState :: State -> Direction -> State
@@ -166,7 +153,7 @@ updateState state dir =
     Storage -> newStateWithoutMovingBox
     Box -> updateStateWithMovingBox state dir newCoord
     _ -> S (playerCoord state) dir (boxCoords state)
-    where newCoord = snd (adjacentCoords dir (playerCoord state))
+    where newCoord = adjacentCoord dir (playerCoord state)
           newPositionTile = currentTile newCoord (boxCoords state)
           newStateWithoutMovingBox = S newCoord dir (boxCoords state)
 
@@ -178,7 +165,7 @@ allList bools =
     _ -> False
     
 isWinning :: State -> Bool
-isWinning state = allList (map (\c -> isStorage (maze c)) (boxCoords state))
+isWinning state = allList (map (\c -> (maze c) == Storage) (boxCoords state))
 
 handleEvent :: Event -> State -> State
 handleEvent _ state
@@ -194,44 +181,11 @@ handleEvent _ state      = state
 atCoord :: Coord -> Picture -> Picture
 atCoord (C x y) pic = translated (fromIntegral x) (fromIntegral y) pic
 
-drawState1 :: Coord -> Picture
-drawState1 c = atCoord c player1 & pictureOfMaze maze
-
 draw :: State -> Picture
 draw state = 
   if isWinning state then winningScreen & board else board
-  where board = atCoord (playerCoord state) (player2 (playerDir state)) 
+  where board = atCoord (playerCoord state) (player (playerDir state)) 
                 & pictureOfMaze (addBoxes (boxCoords state) (removeBoxes maze))
-
-isEscapePressed (KeyPress key)
-  | key == "Esc" = True
-isEscapePressed _ = False
-
-isEscapeReleased (KeyRelease key)
-  | key == "Esc" = True
-isEscapeReleased _ = False
-
--- the game is reseted when `Esc` is pressed or released
-resettableHandleEvent :: 
-  world -> 
-  (Event -> world -> world) -> 
-  (Event -> world -> world)
-resettableHandleEvent initialPos handleEvent = (\evn pos -> 
-  if ((isEscapePressed evn) || (isEscapeReleased evn)) 
-    then handleEvent evn initialPos 
-  else handleEvent evn pos)
-
-isBox :: Tile -> Bool
-isBox t =
-  case t of
-    Box -> True
-    _ -> False
-    
-isStorage :: Tile -> Bool
-isStorage t =
-  case t of
-    Storage -> True
-    _ -> False
 
 data SSState world = StartScreen | Running world
 
@@ -267,13 +221,13 @@ runActivity (Activity state0 handle draw)
 sokobanActivity :: Activity State
 sokobanActivity = Activity (initialState maze (initialBoxes maze boardCoords)) handleEvent draw
 
-walk4 :: IO ()
-walk4 = runActivity (resettable (withStartScreen sokobanActivity))
+walk :: IO ()
+walk = runActivity (resettable (withStartScreen sokobanActivity))
 
 type Program = IO ()
 
 program :: Program
-program = walk4
+program = walk
 
 main :: Program
 main = program
