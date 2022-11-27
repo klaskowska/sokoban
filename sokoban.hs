@@ -89,7 +89,7 @@ type Maze = Coord -> Tile
 addBoxes :: [Coord] -> Maze -> Maze
 addBoxes boxCoords mazeDefinition = (\c -> if containsCoord c boxCoords then Box else mazeDefinition c)
 
-data Direction = R | U | L | D
+data Direction = R | U | L | D deriving Eq
 
 initialCoord :: Coord
 initialCoord = C 0 1
@@ -101,6 +101,8 @@ initialBoxes :: Maze -> [Coord] -> [Coord]
 initialBoxes mazeDefinition coords = filter (\c -> (mazeDefinition c) == Box) coords
 
 data State = S {playerCoord :: Coord, playerDir :: Direction, boxCoords :: [Coord]}
+instance Eq State where
+  S playerCoord playerDir boxCoords == S playerCoord' playerDir' boxCoords' = playerCoord == playerCoord' && playerDir == playerDir' && boxCoords == boxCoords'
 
 initialState :: Maze -> [Coord] -> State
 initialState mazeDefinition coords = S initialCoord initialDirection (initialBoxes mazeDefinition coords)
@@ -213,6 +215,20 @@ withStartScreen (Activity state0 handle draw)
 
     draw' StartScreen = startScreen
     draw' (Running s) = draw s
+    
+data WithUndo a = WithUndo a [a]
+
+withUndo :: Eq a => Activity a -> Activity (WithUndo a)
+withUndo (Activity state0 handle draw) = Activity state0' handle' draw' where
+    state0' = WithUndo state0 []
+    handle' (KeyPress key) (WithUndo s stack) | key == "U"
+      = case stack of s':stack' -> WithUndo s' stack'
+                      []        -> WithUndo s []
+    handle' e              (WithUndo s stack)
+       | s' == s = WithUndo s stack
+       | otherwise = WithUndo (handle e s) (s:stack)
+      where s' = handle e s
+    draw' (WithUndo s _) = draw s
 
 runActivity :: Activity s -> IO ()
 runActivity (Activity state0 handle draw)
@@ -222,7 +238,7 @@ sokobanActivity :: Activity State
 sokobanActivity = Activity (initialState maze (initialBoxes maze boardCoords)) handleEvent draw
 
 walk :: IO ()
-walk = runActivity (resettable (withStartScreen sokobanActivity))
+walk = runActivity (resettable (withStartScreen (withUndo sokobanActivity)))
 
 type Program = IO ()
 
