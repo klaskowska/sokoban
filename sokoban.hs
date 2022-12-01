@@ -1,11 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 import CodeWorld
+import Data.String
 
 startScreen :: Picture
 startScreen = scaled 3 3 (lettering "Sokoban!")
 
-winningScreen :: Picture
-winningScreen = scaled 3 3 (lettering "You win!")
+picture :: (Show a) => a -> Picture
+picture = lettering . fromString . show
+
+winningScreen :: Integer -> Picture
+winningScreen moveCounter = picture ("Poziom ukonczony, liczba ruchow:" ++ show moveCounter)
 
 cloud :: Picture
 cloud = pictures [translated x y (colored white (solidCircle 0.15))
@@ -273,15 +277,15 @@ initialDirection :: Direction
 initialDirection = U
 
 initialBoxes :: (Coord -> Tile) -> [Coord]
-initialBoxes mazeDef = filter (\c -> (mazeDef c) == Box) boardCoords
+initialBoxes mazeDef = filterList (\c -> (mazeDef c) == Box) boardCoords
 
-data State = S {playerCoord :: Coord, playerDir :: Direction, boxCoords :: [Coord], mazeId :: Integer}
+data State = S {playerCoord :: Coord, playerDir :: Direction, boxCoords :: [Coord], mazeId :: Integer, moveCounter :: Integer}
 instance Eq State where
-  S playerCoord playerDir boxCoords mazeId == S playerCoord' playerDir' boxCoords' mazeId' = 
-    playerCoord == playerCoord' && playerDir == playerDir' && boxCoords == boxCoords' && mazeId == mazeId'
+  S playerCoord playerDir boxCoords mazeId moveCounter == S playerCoord' playerDir' boxCoords' mazeId' moveCounter' = 
+    playerCoord == playerCoord' && playerDir == playerDir' && boxCoords == boxCoords' && mazeId == mazeId' && moveCounter == moveCounter'
 
 initialState :: Integer -> State
-initialState mazeId = S (initialCoord maze) initialDirection (initialBoxes (mazeDef maze)) mazeId
+initialState mazeId = S (initialCoord maze) initialDirection (initialBoxes (mazeDef maze)) mazeId 0
                       where maze = nth mazes mazeId
 
 rotate :: Direction -> Picture -> Picture
@@ -314,16 +318,16 @@ currentTile coord boxCoords mazeDef =
 
 moveBox :: [Coord] -> Coord -> Coord -> [Coord]
 moveBox coords lastCoord newCoord = 
-  (filter (\x -> x /= lastCoord) coords) ++ [newCoord]
+  (filterList (\x -> x /= lastCoord) coords) ++ [newCoord]
 
 updateStateWithMovingBox :: State -> Direction -> Coord -> State
 updateStateWithMovingBox state dir newCoord = 
   case currentTile boxNewCoord (boxCoords state) (mazeDef ((nth mazes (mazeId state)))) of
     Ground -> movedBoxState
     Storage -> movedBoxState
-    _ -> S (playerCoord state) dir (boxCoords state) (mazeId state)
+    _ -> S (playerCoord state) dir (boxCoords state) (mazeId state) (moveCounter state)
   where boxNewCoord = adjacentCoord dir newCoord
-        movedBoxState = S newCoord dir (moveBox (boxCoords state) newCoord boxNewCoord) (mazeId state)
+        movedBoxState = S newCoord dir (moveBox (boxCoords state) newCoord boxNewCoord) (mazeId state) (moveCounter state)
 
 updateState :: State -> Direction -> State
 updateState state dir =
@@ -331,10 +335,10 @@ updateState state dir =
     Ground -> newStateWithoutMovingBox
     Storage -> newStateWithoutMovingBox
     Box -> updateStateWithMovingBox state dir newCoord
-    _ -> S (playerCoord state) dir (boxCoords state) (mazeId state)
+    _ -> S (playerCoord state) dir (boxCoords state) (mazeId state) (moveCounter state + 1)
     where newCoord = adjacentCoord dir (playerCoord state)
           newPositionTile = currentTile newCoord (boxCoords state) (mazeDef ((nth mazes (mazeId state))))
-          newStateWithoutMovingBox = S newCoord dir (boxCoords state) (mazeId state)
+          newStateWithoutMovingBox = S newCoord dir (boxCoords state) (mazeId state) (moveCounter state + 1)
 
 a :: Coord -> State -> Bool
 a c state = (mazeDef (nth mazes (mazeId state))) c == Storage
@@ -347,9 +351,8 @@ nextId state = if currentId < listLength mazes - 1 then currentId + 1 else curre
                where currentId = mazeId state
 
 handleEvent :: Event -> State -> State
-handleEvent _ state
-    | isWinning state = initialState (nextId state)
 handleEvent (KeyPress key) state
+    | key == "N" = initialState (nextId state)
     | key == "Right" = go R
     | key == "Up"    = go U
     | key == "Left"  = go L
@@ -362,7 +365,7 @@ atCoord (C x y) pic = translated (fromIntegral x) (fromIntegral y) pic
 
 draw :: State -> Picture
 draw state = 
-  if isWinning state then winningScreen & board else board
+  if isWinning state then (winningScreen (moveCounter state)) & board else board
   where board = atCoord (playerCoord state) (player (playerDir state)) 
                 & pictureOfMaze (addBoxes (boxCoords state) (removeBoxes (mazeDef (nth mazes (mazeId state)))))
 
@@ -419,8 +422,8 @@ walk = runActivity (resettable (withStartScreen (withUndo sokobanActivity)))
 
 type Program = IO ()
 
-program :: Program
-program = walk
+etap5 :: Program
+etap5 = walk
 
 main :: Program
-main = program
+main = etap5
