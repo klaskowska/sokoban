@@ -120,13 +120,32 @@ allReachable vs initial neighbours = allList (\e -> reachable e initial neighbou
 data Maze = Maze {initialCoord :: Coord, mazeDef :: (Coord -> Tile)}
 mazes :: [Maze]
 mazes = [
+  Maze (C 0 0)       easy_veryFirstLevel,
   Maze (C (-2) (-2)) easy_testMaze_GN,
   Maze (C 1 (-1))    easy_spiralMaze_DM,
   Maze (C 0 0)       easy_decoratedMaze_BS,
+  Maze (C 0 (-1))      medium_freeze,
   Maze (C 1 1)       medium_maze4_GN,
   Maze (C 0 1)       medium_maze3_GN,
   Maze (C 1 (-3))    hard_maze2_GN
   ]
+
+easy_veryFirstLevel :: Coord -> Tile
+easy_veryFirstLevel (C x y)
+  | abs x > 4  || abs y > 4  = Blank
+  | abs x == 4 || abs y == 4 = Wall
+  | x == 0 && y == 1         = Box
+  | x == 0 && y == -1        = Storage
+  | otherwise                = Ground
+
+medium_freeze :: Coord -> Tile
+medium_freeze (C x y)
+  | abs x > 3  || abs y > 2      = Blank
+  | abs x == 3 || abs y == 2     = Wall
+  | x == 0 && y == 0             = Box
+  | x == -1 && y == -1           = Box
+  | (x == 1 || x == 2) && y == 1 = Storage
+  | otherwise                    = Ground
 
 easy_testMaze_GN :: Coord -> Tile
 easy_testMaze_GN (C x y)
@@ -214,8 +233,22 @@ badMazes :: [Maze]
 badMazes = [
   Maze (C (-2) (-2)) badTestMaze_BS,
   Maze (C 1 (-1))    cutOffStorageMaze_DM,
-  Maze (C (-1) 0)    holeInTheWallMaze_BS
+  Maze (C (-1) 0)    holeInTheWallMaze_BS,
+  Maze (C 0 0)       strips,
+  -- initial position on box
+  Maze (C (-2) 0)    easy_testMaze_GN,
+  -- initial position on wall 
+  Maze (C 3 4)       easy_testMaze_GN,
+  -- initial position on Empty
+  Maze (C 5 5)       easy_testMaze_GN
   ]
+
+strips :: Coord -> Tile
+strips (C x y)
+  | x == 4 && y == 4         = Box
+  | x == -4 && y == -4       = Storage
+  | abs x > 4  || abs y > 4  = Blank
+  | abs x == 3 || abs x == 1 = Wall
 
 badTestMaze_BS :: Coord -> Tile
 badTestMaze_BS (C x y)
