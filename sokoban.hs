@@ -3,7 +3,7 @@ import CodeWorld
 import Data.String
 
 startScreen :: Picture
-startScreen = scaled 3 3 (lettering "Sokoban!")
+startScreen = mazesReachability
 
 picture :: (Show a) => a -> Picture
 picture = lettering . fromString . show
@@ -76,6 +76,9 @@ elemList x list = foldList (\e res -> if res then res else e == x) False list
 appendList :: [a] -> [a] -> [a]
 appendList list1 list2 = foldList (\e res -> e:res) list2 (reverseList list1)
 
+appendListWithoutMulti :: Eq a => [a] -> [a] -> [a]
+appendListWithoutMulti list1 list2 = foldList (\e res -> if elemList e res then res else e:res) list2 (reverseList list1)
+
 listLength :: [a] -> Integer
 listLength list = foldList (\_ res -> res + 1) 0 list
 
@@ -101,7 +104,7 @@ isGraphClosedHelper initial neighbours isOk visited = if elemList initial visite
     then foldList (\e (resIsOk, resVisited) -> 
       if resIsOk
         then let (eIsOk, eVisited) = isGraphClosedHelper e neighbours isOk resVisited in 
-        if eIsOk then (True, e:eVisited) else (False, eVisited)
+        if eIsOk then (True, eVisited) else (False, eVisited)
       else (resIsOk, resVisited)
     ) (True, initial:visited) (neighbours initial)
     else (False, visited)
@@ -115,6 +118,37 @@ reachable v initial neighbours = not (isGraphClosed initial neighbours (\e -> e 
 allReachable :: Eq a => [a] -> a -> (a -> [a]) -> Bool
 allReachable vs initial neighbours = allList (\e -> reachable e initial neighbours) vs
 
+nearestNeighbours :: (Coord -> Tile) -> Coord -> [Coord]
+nearestNeighbours mazeDef c = if mazeDef c == Blank
+  then []
+  else filterList (\e -> mazeDef e /= Wall) [C (cx - 1) cy, C (cx + 1) cy, C cx (cy - 1), C cx (cy + 1)]
+    where cx = x c
+          cy = y c
+
+coordNeighbours :: (Coord -> Tile) -> Coord -> [Coord] -> [Coord]
+coordNeighbours mazeDef c visited = if elemList c visited
+  then visited
+  else foldList (\neighbour neighbours -> if elemList neighbour neighbours
+    then neighbours
+    else appendListWithoutMulti neighbours (coordNeighbours mazeDef neighbour neighbours)) (appendList [c] visited) (nearestNeighbours mazeDef c)
+
+mazeNeighbours :: (Coord -> Tile) -> (Coord -> [Coord])
+mazeNeighbours mazeDef = (\c -> coordNeighbours mazeDef c [])
+
+isClosed :: Maze -> Bool
+isClosed maze =
+  case mDef initial of
+    Box -> False
+    Blank -> False
+    Wall -> False
+    otherwise -> isGraphClosed initial (mazeNeighbours mDef) (\c -> mDef c /= Blank)
+    where mDef = mazeDef maze
+          initial = initialCoord maze
+
+isSane :: Maze -> Bool
+isSane (Maze initial def) = (listLength (filterList (\c -> def c == Storage) neighbours)) >= (listLength (filterList (\c -> def c == Box) neighbours))
+  where neighbours = coordNeighbours def initial []
+
 -- Mazes
 
 data Maze = Maze {initialCoord :: Coord, mazeDef :: (Coord -> Tile)}
@@ -124,7 +158,6 @@ mazes = [
   Maze (C (-2) (-2)) easy_testMaze_GN,
   Maze (C 1 (-1))    easy_spiralMaze_DM,
   Maze (C 0 0)       easy_decoratedMaze_BS,
-  Maze (C 0 (-1))      medium_freeze,
   Maze (C 1 1)       medium_maze4_GN,
   Maze (C 0 1)       medium_maze3_GN,
   Maze (C 1 (-3))    hard_maze2_GN
@@ -137,15 +170,6 @@ easy_veryFirstLevel (C x y)
   | x == 0 && y == 1         = Box
   | x == 0 && y == -1        = Storage
   | otherwise                = Ground
-
-medium_freeze :: Coord -> Tile
-medium_freeze (C x y)
-  | abs x > 3  || abs y > 2      = Blank
-  | abs x == 3 || abs y == 2     = Wall
-  | x == 0 && y == 0             = Box
-  | x == -1 && y == -1           = Box
-  | (x == 1 || x == 2) && y == 1 = Storage
-  | otherwise                    = Ground
 
 easy_testMaze_GN :: Coord -> Tile
 easy_testMaze_GN (C x y)
@@ -249,6 +273,7 @@ strips (C x y)
   | x == -4 && y == -4       = Storage
   | abs x > 4  || abs y > 4  = Blank
   | abs x == 3 || abs x == 1 = Wall
+  | otherwise                = Ground
 
 badTestMaze_BS :: Coord -> Tile
 badTestMaze_BS (C x y)
@@ -280,6 +305,21 @@ holeInTheWallMaze_BS (C x y)
   | x == 1 && y == 0         = Storage
   | otherwise                = Ground
 
+pictureOfBools :: [Bool] -> Picture
+pictureOfBools xs = translated (-fromIntegral k / 2) (fromIntegral k) (go 0 xs)
+  where n = length xs
+        k = findK 0 -- k is the integer square of n
+        findK i | i * i >= n = i
+                | otherwise  = findK (i+1)
+        go _ [] = blank
+        go i (b:bs) =
+          translated (fromIntegral (i `mod` k))
+                     (-fromIntegral (i `div` k))
+                     (pictureOfBool b)
+          & go (i+1) bs
+
+        pictureOfBool True =  colored green (solidCircle 0.4)
+        pictureOfBool False = colored red   (solidCircle 0.4)
 
 pictureOfMaze :: (Coord -> Tile) -> Picture
 pictureOfMaze mazeDef = pictures [translated (fromIntegral x) (fromIntegral y) (drawTile (mazeDef (C x y))) 
@@ -376,8 +416,12 @@ updateState state dir =
 a :: Coord -> State -> Bool
 a c state = (mazeDef (nth mazes (mazeId state))) c == Storage
 
+reachableBoxes :: Maze -> [Coord] -> [Coord]
+reachableBoxes (Maze initialCoord mazeDef) boxCoords = filterList (\c -> currentTile c boxCoords mazeDef == Box) (coordNeighbours mazeDef initialCoord [])
+
 isWinning :: State -> Bool
-isWinning state = allList (\c -> ((mazeDef (nth mazes (mazeId state))) c) == Storage) (boxCoords state)
+isWinning state = allList (\c -> ((mazeDef maze) c) == Storage) (reachableBoxes maze (boxCoords state))
+  where maze = nth mazes (mazeId state)
 
 nextId :: State -> Integer
 nextId state = if currentId < listLength mazes - 1 then currentId + 1 else currentId
@@ -454,6 +498,12 @@ walk :: IO ()
 walk = runActivity (resettable (withStartScreen (withUndo sokobanActivity)))
 
 type Program = IO ()
+
+allMazes = appendList mazes badMazes
+mazesReachability = pictureOfBools (map (\m -> isSane m && isClosed m) allMazes)
+
+etap4 :: Program
+etap4 = drawingOf(mazesReachability)
 
 etap5 :: Program
 etap5 = walk
